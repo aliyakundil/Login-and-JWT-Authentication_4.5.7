@@ -16,18 +16,18 @@ import {
   followUser,
   unfollowUser,
 } from "../services/userServices.js";
+import { authenticateToken, requireRole} from "../middleware/auth.js"; 
+import type {AuthJwtPayload } from "../middleware/auth.js"
 
-const routes = Router();
+const router = Router();
 
 dotenv.config();
-
-let refreshTokens: any = [];
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
-routes.post("/register", async (req, res) => {
-  const { email, password, username, profile, isEmailVerified } = req.body;
+router.post("/auth/register", async (req, res) => {
+  const { email, password, username, profile, isEmailVerified, role } = req.body;
   const { firstName, lastName, bio } = profile || {};
 
   const users = await registerUser(req.body);
@@ -43,12 +43,13 @@ routes.post("/register", async (req, res) => {
     username: username,
     isEmailVerified: isEmailVerified,
     profile: profile,
+    role: role
   };
 
   res.status(201).send(userDto);
 });
 
-routes.get("/verify-email", async (req, res) => {
+router.get("/auth/verify-email", async (req, res) => {
   const token = req.query.token as string;
 
   if (!token || typeof token !== "string") {
@@ -70,7 +71,7 @@ routes.get("/verify-email", async (req, res) => {
   res.send("Email verified successfully");
 });
 
-routes.post("/resend-verification", async (req, res) => {
+router.post("/auth/resend-verification", async (req, res) => {
   const { email } = req.body;
 
   const userEmail = await User.findOne({
@@ -83,13 +84,13 @@ routes.post("/resend-verification", async (req, res) => {
   const payload = { userId: userEmail._id };
 
   const accessToken = jwt.sign(payload, ACCESS_TOKEN_SECRET!, {
-    expiresIn: "30m",
+    expiresIn: "15m",
   }); // уникальный токен
   const refreshToken = jwt.sign(payload, REFRESH_TOKEN_SECRET!, {
     expiresIn: "7d",
   });
 
-  userEmail.refreshToken = refreshToken;
+  userEmail.refreshToken.push(refreshToken);
 
   res.json({
     message: "Verification tokens generated",
@@ -98,14 +99,14 @@ routes.post("/resend-verification", async (req, res) => {
   });
 });
 
-function generateAccessToken(user: any) {
-  return jwt.sign(user, process.env.ACCESS_TOKEN_SECRET!, { expiresIn: "60s" });
+function generateAccessToken(payload: { userId: string; role: string }) {
+  return jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET!, { expiresIn: "60s" });
 }
 
-routes.post("/login", async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+router.post("/auth/login", async (req: Request, res: Response) => {
+  const { username, email, password } = req.body;
 
-  const user = await User.findOne({ email }).select("+password");
+  const user = await User.findOne({ $or: [{ email }, { username }] }).select("+password");
 
   if (!user) {
     return res.status(401).json({ msg: "Invalid credentials" });
@@ -117,27 +118,30 @@ routes.post("/login", async (req: Request, res: Response) => {
   }
 
   const payload = {
-    userId: user._id,
+    userId: user._id.toString(),
     role: user.role,
   };
 
-  const accessToken = generateAccessToken(user);
-  const refreshToken = jwt.sign(user, process.env.REFRESH_TOKEN_SECRET!);
+  const accessToken = generateAccessToken(payload);
+  const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET!);
 
-  refreshTokens.push(refreshToken);
+  user.refreshToken.push(refreshToken);
+
   await user.save();
 
   res.json({ accessToken, refreshToken });
 });
 
-routes.post("/token", (req: Request, res: Response) => {
+router.post("/auth/token", async (req: Request, res: Response) => {
   const refreshToken = req.body.token;
+  const user = await User.findOne({ refreshToken });
+  if (!user) return res.sendStatus(403);
   if (!refreshToken) return res.sendStatus(401);
-  if (!refreshTokens.includes(refreshToken)) return res.sendStatus(403);
+  if (!user.refreshToken.includes(refreshToken)) return res.sendStatus(403);
 
   jwt.verify(
     refreshToken,
-    process.env.REFRESH_TOKEN_SCRET!,
+    process.env.REFRESH_TOKEN_SECRET!,
     (err: any, decoded: any) => {
       if (err) return res.sendStatus(403);
 
@@ -146,21 +150,59 @@ routes.post("/token", (req: Request, res: Response) => {
         role: decoded.role,
       };
 
-      const newAccessToken = generateAccessToken({ name: payload });
+      const newAccessToken = generateAccessToken(payload);
       res.json({ accessToken: newAccessToken });
     },
   );
 });
 
-routes.delete("/logout", (req, res) => {
+router.post("/auth/refresh", async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.sendStatus(401);
+  const user = await User.findOne({ refreshToken });
+  if (!user) return res.sendStatus(403);
+  const payload = {
+    userId: user._id.toString(),
+    role: user.role,
+  };
+  const accessToken = generateAccessToken(payload);
+
+  user.emailVerificationToken = accessToken;
+
+  await user.save();
+
+  res.status(200).json({ accessToken, refreshToken });
+});
+
+router.post("/auth/logout", async (req, res) => {
   const refreshToken = req.body.token;
-  refreshTokens = refreshTokens.filter((f: any) => f !== refreshToken);
+  if (!refreshToken)return res.sendStatus(400);
+  const user = await User.findOne({refreshToken: {$in: [refreshToken] } });
+  if (!user) return res.sendStatus(403);
+  user.refreshToken = user.refreshToken.filter((f: any) => f !== refreshToken);
   res.sendStatus(204);
 });
 
-const router = express.Router();
+// ===== Приватные маршруты для любого авторизованного пользователя =====
+router.get('/me', authenticateToken, async (req, res) => {
+  const userId = (req.user as AuthJwtPayload).userId;
+  const user = await User.findById(userId).select("-password -refreshTokens");
+  if (!user) return res.status(404).json({ error: "User not found" });
+  res.json(user);
+})
 
-router.get("/users", async (req, res, next) => {
+router.patch('/me', authenticateToken, async (req, res) => {
+  const userId = (req.user as AuthJwtPayload).userId;
+  const body = req.body;
+
+  if (!body.profile) return res.status(400).json({ error: "Profile data required" });
+
+  const userUpdate = await patchUser(userId, body);
+  res.json(userUpdate);
+})
+
+// ===== Админские =====
+router.get("/admin/users", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const user = await getUsers(req.query);
     res.status(200).json({ success: true, data: user });
@@ -169,7 +211,7 @@ router.get("/users", async (req, res, next) => {
   }
 });
 
-router.get("/users/:id", async (req, res, next) => {
+router.get("/admin/users/:id", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const id = req.params.id;
 
@@ -178,6 +220,10 @@ router.get("/users/:id", async (req, res, next) => {
         success: false,
         error: "User not found",
       });
+    }
+
+    if (!id || Array.isArray(id)) {
+      return res.status(400).json({ success: false, error: "Invalid user id" });
     }
 
     const result = await getUserById(id);
@@ -195,7 +241,7 @@ router.get("/users/:id", async (req, res, next) => {
   }
 });
 
-router.post("/users", async (req, res, next) => {
+router.post("/admin/users", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const result = await createUser(req.body);
     res.status(201).json({ success: true, data: result });
@@ -204,9 +250,14 @@ router.post("/users", async (req, res, next) => {
   }
 });
 
-router.put("/users/:id", async (req, res, next) => {
+router.put("/admin/users/:id", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const id = req.params.id;
+
+    if (!id || Array.isArray(id)) {
+      return res.status(400).json({ success: false, error: "Invalid user id" });
+    }
+
     const result = await updateUser(id, req.body);
 
     if (!result) {
@@ -222,7 +273,7 @@ router.put("/users/:id", async (req, res, next) => {
   }
 });
 
-router.patch("/users/:id", async (req, res, next) => {
+router.patch("/admin/users/:id", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const id = req.params.id;
 
@@ -232,6 +283,10 @@ router.patch("/users/:id", async (req, res, next) => {
       const err = new Error("Body не может быть пустым");
       (err as any).status = 400;
       return next(err);
+    }
+
+    if (!id || Array.isArray(id)) {
+      return res.status(400).json({ success: false, error: "Invalid user id" });
     }
 
     const result = await patchUser(id, req.body);
@@ -248,9 +303,14 @@ router.patch("/users/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/users/:id", async (req, res, next) => {
+router.delete("/admin/users/:id", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const id = req.params.id;
+
+    if (!id || Array.isArray(id)) {
+      return res.status(400).json({ success: false, error: "Invalid user id" });
+    }
+
     const deleted = await deleteUser(id);
 
     if (!deleted) {
@@ -265,7 +325,7 @@ router.delete("/users/:id", async (req, res, next) => {
   }
 });
 
-router.post("/users/:id/follow", async (req, res, next) => {
+router.post("/admin/users/:id/follow", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const targetUserId = req.params.id;
     const currentUserId = req.body.userId;
@@ -282,6 +342,10 @@ router.post("/users/:id/follow", async (req, res, next) => {
       return next(err);
     }
 
+    if (!targetUserId || Array.isArray(targetUserId)) {
+      return res.status(400).json({ success: false, error: "Invalid user targetUserId" });
+    }
+
     const result = await followUser(targetUserId, currentUserId);
 
     res.status(201).json({
@@ -295,7 +359,7 @@ router.post("/users/:id/follow", async (req, res, next) => {
   }
 });
 
-router.post("/users/:id/unfollow", async (req, res, next) => {
+router.post("/admin/users/:id/unfollow", authenticateToken, requireRole("admin"), async (req, res, next) => {
   try {
     const targetUserId = req.params.id;
     const currentUserId = req.body.userId;
@@ -310,6 +374,10 @@ router.post("/users/:id/unfollow", async (req, res, next) => {
       const err = new Error("You cannot unfollow yourself");
       (err as any).status = 400;
       return next(err);
+    }
+
+    if (!targetUserId || Array.isArray(targetUserId)) {
+      return res.status(400).json({ success: false, error: "Invalid user targetUserId" });
     }
 
     const result = await unfollowUser(currentUserId, targetUserId);

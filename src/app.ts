@@ -24,8 +24,8 @@ app.get("/", (_req: Request, res: Response) => {
   });
 });
 
-app.use("/api/auth", authRouter);
 app.use("/api", authRouter);
+// app.use("/api", authRouter);
 
 export function errorHandler(
   err: ApiError,

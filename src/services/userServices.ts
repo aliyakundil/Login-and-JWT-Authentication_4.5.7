@@ -135,8 +135,8 @@ export async function followUser(followerId: string, followingId: string) {
   const followerObjectId = new mongoose.Types.ObjectId(followerId);
   const followingObjectId = new mongoose.Types.ObjectId(followingId);
 
-  const follower = await UserModel.findById(followerObjectId);
-  const following = await UserModel.findById(followingObjectId);
+  const follower = await User.findById(followerObjectId);
+  const following = await User.findById(followingObjectId);
 
   if (!follower || !following) {
     throw new Error("User not found");
@@ -168,8 +168,8 @@ export async function unfollowUser(followerId: string, followingId: string) {
   const followerObjectId = new mongoose.Types.ObjectId(followerId);
   const followingObjectId = new mongoose.Types.ObjectId(followingId);
 
-  const follower = await UserModel.findById(followerObjectId);
-  const following = await UserModel.findById(followingObjectId);
+  const follower = await User.findById(followerObjectId);
+  const following = await User.findById(followingObjectId);
 
   if (!follower || !following) {
     throw new Error("User not found");

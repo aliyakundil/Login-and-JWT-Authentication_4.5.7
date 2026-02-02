@@ -3,7 +3,7 @@ import User from "../models/User.js";
 import crypto from "crypto";
 
 export async function registerUser(data: any) {
-  const { email, password, username, profile } = data;
+  const { email, password, username, profile, role } = data;
 
   const hashPassword = await bcrypt.hash(password, 16);
 
@@ -15,6 +15,7 @@ export async function registerUser(data: any) {
     username,
     profile,
     emailVerificationToken: emailToken,
+    role
   });
 
   await user.save();

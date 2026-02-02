@@ -32,7 +32,10 @@ export const userSchema = new mongoose.Schema(
     },
     isEmailVerified: { type: Boolean, default: false },
     emailVerificationToken: String,
-    refreshToken: String,
+    refreshToken: {
+      type: [String],
+      default: []
+    },
     role: {
       type: String,
       enum: ["user", "admin"],

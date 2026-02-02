@@ -9,7 +9,7 @@
     "start": "node src/app.js",
     "dev": "tsx watch src/app.ts",
     "build": "tsc",
-    "format":"prettier --write 'src/**/*.{ts,tsx,js,json,md}'",
+    "format": "prettier --write 'src/**/*.{ts,tsx,js,json,md}'",
     "lint": "eslint 'src/**/*.{ts,tsx}' --fix"
   },
   "keywords": [],
@@ -38,5 +38,13 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aliyakundil/Login-and-JWT-Authentication_4.5.7.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aliyakundil/Login-and-JWT-Authentication_4.5.7/issues"
+  },
+  "homepage": "https://github.com/aliyakundil/Login-and-JWT-Authentication_4.5.7#readme"
 }
