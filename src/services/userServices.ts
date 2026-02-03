@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import mongoose from "mongoose";
 import User from "../models/User.js";
+import bcrypt from "bcrypt";
 
 interface CreateUserInput {
   username: string;
@@ -75,10 +76,13 @@ export async function getUserById(id: string) {
 export async function createUser(input: CreateUserInput) {
   if (!input.username || input.username.trim() === "")
     throw new Error("Username is required");
+  if (!input.password || input.password.trim() === "")
+    throw new Error("Password is required");
+  const hashPassword = await bcrypt.hash(input.password, 16);
   const newUser = await User.create({
     username: input.username,
     email: input.email,
-    password: input.password,
+    password: hashPassword,
     profile: {
       firstName: input.profile.firstName,
       lastName: input.profile.lastName,
@@ -86,9 +90,7 @@ export async function createUser(input: CreateUserInput) {
     },
   });
 
-  const user = await User.findById(newUser._id);
-
-  return user;
+  return newUser;
 }
 
 export async function updateUser(id: string, input: UpdateUserInput) {

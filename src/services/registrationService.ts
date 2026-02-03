@@ -15,7 +15,7 @@ export async function registerUser(data: any) {
     username,
     profile,
     emailVerificationToken: emailToken,
-    role
+    role,
   });
 
   await user.save();

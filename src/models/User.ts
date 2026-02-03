@@ -34,7 +34,7 @@ export const userSchema = new mongoose.Schema(
     emailVerificationToken: String,
     refreshToken: {
       type: [String],
-      default: []
+      default: [],
     },
     role: {
       type: String,
